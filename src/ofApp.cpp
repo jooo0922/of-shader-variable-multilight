@@ -80,11 +80,6 @@ glm::vec3 getLightColor(PointLight& l) {
     return l.color * l.intensity;
 }
 
-glm::vec3 getLightColor(SpotLight& l) {
-    // 스포트라이트 구조체에서 vec3 값인 조명색상에 float 값인 조명강도를 스칼라배로 곱해줘서 조명색상의 밝기를 지정함.
-    return l.color * l.intensity;
-}
-
 //--------------------------------------------------------------
 void ofApp::setup(){
     ofDisableArbTex(); // 스크린 픽셀 좌표를 사용하는 텍스쳐 관련 오픈프레임웍스 레거시 지원 설정 비활성화. (uv좌표계랑 다르니까!)
@@ -102,8 +97,12 @@ void ofApp::setup(){
     
     cubeMesh.load("cube.ply"); // cubeMesh 메쉬로 사용할 모델링 파일 로드
 
-    waterShader.load("water.vert", "multiLightWater.frag"); // planeMesh 에 노말맵을 활용한 물셰이더를 적용하기 위한 셰이더 파일 로드
-    blinnPhong.load("mesh.vert", "multiLight.frag"); // shieldMesh 에 (노말맵)텍스쳐를 활용한 Blinn-phong 반사모델을 적용하기 위한 셰이더 파일 로드
+    dirLightShaders[0].load("mesh.vert", "dirLight.frag"); // 방패메쉬에 적용할 디렉셔널 라이트 쉐이더 파일 로드
+    pointLightShaders[0].load("mesh.vert", "pointLight.frag"); // 방패메쉬에 적용할 포인트라이트 쉐이더 파일 로드
+    
+    dirLightShaders[1].load("water.vert", "dirLightWater.frag"); // plane 메쉬에 적용할 디렉셔널 라이트 쉐이더 파일 로드
+    pointLightShaders[1].load("water.vert", "pointLightWater.frag"); // plane 메쉬에 적용할 포인트라이트 쉐이더 파일 로드
+    
     skyboxShader.load("skybox.vert", "skybox.frag"); // cubeMesh 에 큐브맵 텍스쳐를 적용한 셰이더를 적용하기 위한 셰이더 파일 로드
         
     waterNrm.load("water_nrm.png"); // planeMesh 의 조명계산에서 노말맵으로 사용할 텍스쳐 로드
@@ -117,6 +116,38 @@ void ofApp::setup(){
     cubemap.load("night_front.jpg", "night_back.jpg",
             "night_right.jpg", "night_left.jpg",
             "night_top.jpg", "night_bottom.jpg");
+    
+    // 이전 예제들과 다르게 draw() 함수가 아닌 setup() 함수에서 조명구조체에 조명데이터를 할당해 줌.
+    // 근데 사실 생각하면 원래부터 setup() 함수에서 세팅을 해줘야하는게 맞음. 조명데이터를 draw() 함수에서 반복적으로 할당해줄 필요는 없으니까...
+    // 원하는 개수만큼 포인트라이트 구조체를 생성하여 조명데이터 할당.
+    PointLight pl0;
+    pl0.color = glm::vec3(1, 0, 0);
+    pl0.radius = 1.0f;
+    pl0.position = glm::vec3(-0.5, 0.35, 0.25);
+    pl0.intensity = 3.0;
+    
+    PointLight pl1;
+    pl0.color = glm::vec3(0, 1, 0);
+    pl0.radius = 1.0f;
+    pl0.position = glm::vec3(0.5, 0.35, 0.25);
+    pl0.intensity = 3.0;
+    
+    PointLight pl2;
+    pl0.color = glm::vec3(0, 0, 1);
+    pl0.radius = 1.0f;
+    pl0.position = glm::vec3(0.0, 0.7, 0.25);
+    pl0.intensity = 3.0;
+    
+    // 원하는 개수만큼 생성한 포인트라이트 구조체를 pointLights 동적배열에 push함
+    // 참고로, 동적배열.push_back() 은 요소를 동적배열 맨뒤에 추가할 때 사용하는 함수임.
+    pointLights.push_back(pl0);
+    pointLights.push_back(pl1);
+    pointLights.push_back(pl2);
+    
+    // 디렉셔널 라이트 구조체 생성하여 조명데이터 할당
+    dirLight.color = glm::vec3(1, 1, 0);
+    dirLight.intensity = 0.25f;
+    dirLight.direction = glm::vec3(0, 0, -1);
 }
 
 //--------------------------------------------------------------
@@ -125,7 +156,7 @@ void ofApp::update(){
 }
 
 // waterMesh 의 각종 변환행렬을 계산한 뒤, 유니폼 변수들을 전송해주면서 드로우콜을 호출하는 함수
-void ofApp::drawWater(glm::mat4& proj, glm::mat4& view) {
+void ofApp::drawWater(Light& light, glm::mat4& proj, glm::mat4& view) {
     using namespace glm;
     
     static float t = 0.0f; // static 을 특정 함수 내에서 사용하는 것을 '정적 지역 변수'라고 하며, 이 할당문은 drawWater() 함수 최초 호출 시 1번만 실행됨.
@@ -156,10 +187,13 @@ void ofApp::drawWater(glm::mat4& proj, glm::mat4& view) {
     */
     mat3 normalMatrix = mat3(transpose(inverse(model)));
     
-    ofShader& shd = waterShader; // 참조자 shd 는 ofShader 타입의 멤버변수 waterShader 를 참조하도록 함.
+    // 인자로 받아온 Light 구조체의 isPointLight() 함수 리턴값에 따라 포인트라이트 셰이더 또는 디렉셔널라이트 셰이더 중에서 참조자 shd 가 어떤 셰이더 객체를 참조하도록 할 지 결정함.
+    ofShader& shd = light.isPointLight() ? pointLightShaders[1] : dirLightShaders[1];
     
-    // shd(waterShader 를 참조) 를 바인딩하여 사용 시작
+    // shd 를 바인딩하여 사용 시작
     shd.begin();
+    light.apply(shd); // 인자로 전달받는 각 조명구조체는 부모구조체 Light 로부터 상속받은 apply 함수에서 유니폼 변수에 자신의 멤버변수 값을 전송하는 로직이 override 되어있음. 이걸 여기서 호출함으로써 유니폼 변수에 멤버변수값을 전송하려는 것.
+    
     shd.setUniformMatrix4f("mvp", mvp); // 위에서 한꺼번에 합쳐준 mvp 행렬을 버텍스 셰이더 유니폼 변수로 전송
     shd.setUniformMatrix4f("model", model); // 버텍스 좌표를 월드좌표로 변환하기 위해 모델행렬만 따로 버텍스 셰이더 유니폼 변수로 전송
     shd.setUniformMatrix3f("normalMatrix", normalMatrix); // 노말행렬을 버텍스 셰이더 유니폼 변수로 전송
@@ -167,38 +201,13 @@ void ofApp::drawWater(glm::mat4& proj, glm::mat4& view) {
     shd.setUniformTexture("normTex", waterNrm, 0); // 노말 매핑에 사용할 텍스쳐 유니폼 변수로 전송
     shd.setUniformTexture("envMap", cubemap.getTexture(), 1); // 환경맵 반사를 적용하기 위해 사용할 큐브맵 텍스쳐 유니폼 변수로 전송
     shd.setUniform1f("time", t); // uv 스크롤링에 사용할 시간값 유니폼 변수로 전송
-    
-    // 이제 각 조명유형별 구조체배열마다 별도로 유니폼 변수에 데이터를 전송해줘야 함.
-    // 참고로, 유니폼 변수 이름의 경우, 쉐이더에서도 헤더파일에서 선언한 것과 유사하게 각 조명별 구조체배열을 uniform 변수로 정의하고 있으므로,
-    // ofApp.cpp 에서 접근하고 있는 것과 동일한 방식으로 데이터를 전달하고자 하는 유니폼 변수명을 지정해주면 됨!
-    shd.setUniform3f("directionalLights[0].direction", getLightDirection(dirLights[0]));
-    shd.setUniform3f("directionalLights[0].color", getLightColor(dirLights[0]));
-    
-    shd.setUniform3f("pointLights[0].position", pointLights[0].position);
-    shd.setUniform3f("pointLights[0].color", getLightColor(pointLights[0]));
-    shd.setUniform1f("pointLights[0].radius", pointLights[0].radius);
-    
-    shd.setUniform3f("pointLights[1].position", pointLights[1].position);
-    shd.setUniform3f("pointLights[1].color", getLightColor(pointLights[1]));
-    shd.setUniform1f("pointLights[1].radius", pointLights[1].radius);
-    
-    shd.setUniform3f("spotLights[0].position", spotLights[0].position);
-    shd.setUniform3f("spotLights[0].direction", spotLights[0].direction);
-    shd.setUniform3f("spotLights[0].color", getLightColor(spotLights[0]));
-    shd.setUniform1f("spotLights[0].cutoff", spotLights[0].cutoff);
-    
-    shd.setUniform3f("spotLights[1].position", spotLights[1].position);
-    shd.setUniform3f("spotLights[1].direction", spotLights[1].direction);
-    shd.setUniform3f("spotLights[1].color", getLightColor(spotLights[1]));
-    shd.setUniform1f("spotLights[1].cutoff", spotLights[1].cutoff);
-    
     shd.setUniform3f("ambientCol", glm::vec3(0.0, 0.0, 0.0)); // 환경광으로 사용할 앰비언트 라이트 색상값을 유니폼 변수로 전송.
     shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
     
     planeMesh.draw(); // planeMesh(waterMesh) 메쉬 드로우콜 호출하여 그려줌.
     
     shd.end();
-    // shd(waterShader) 사용 중단
+    // shd 사용 중단
 }
 
 void ofApp::drawSkybox(glm::mat4& proj, glm::mat4& view) {
@@ -227,18 +236,20 @@ void ofApp::drawSkybox(glm::mat4& proj, glm::mat4& view) {
     glDepthFunc(GL_LESS); // 스카이박스를 다 그린 뒤 깊이비교모드를 원래대로 원상복구함. (깊이비교모드 관련 필기 하단 참고) Less 의 줄임말. 즉, > (보다 작음. 미만)을 의미
 }
 
-void ofApp::drawShield(glm::mat4& proj, glm::mat4& view) {
+void ofApp::drawShield(Light& light, glm::mat4& proj, glm::mat4& view) {
     using namespace glm;
     
     mat4 model = translate(vec3(0.0, 0.75, 0.0f)); // shieldMesh 의 모델행렬 계산 (이동행렬만 적용)
     mat4 mvp = proj * view * model; // 최적화를 위해 c++ 단에서 투영 * 뷰 * 모델행렬을 한꺼번에 곱해서 버텍스 셰이더에 전송함.
     mat3 normalMatrix = mat3(transpose(inverse(model))); // 노말행렬은 '모델행렬의 상단 3*3 역행렬의 전치행렬' 로 계산함.
     
-    ofShader& shd = blinnPhong; // 참조자 shd 는 ofShader 타입의 멤버변수 blinnPhong 셰이더 객체를 참조하도록 함.
-    
-    // shd(blinnPhong 를 참조) 를 바인딩하여 사용 시작
+    // 인자로 받아온 Light 구조체의 isPointLight() 함수 리턴값에 따라 포인트라이트 셰이더 또는 디렉셔널라이트 셰이더 중에서 참조자 shd 가 어떤 셰이더 객체를 참조하도록 할 지 결정함.
+    ofShader& shd = light.isPointLight() ? pointLightShaders[0] : dirLightShaders[0];
+
+    // shd 를 바인딩하여 사용 시작
     shd.begin();
-    
+    light.apply(shd); // 인자로 전달받는 각 조명구조체는 부모구조체 Light 로부터 상속받은 apply 함수에서 유니폼 변수에 자신의 멤버변수 값을 전송하는 로직이 override 되어있음. 이걸 여기서 호출함으로써 유니폼 변수에 멤버변수값을 전송하려는 것.
+
     shd.setUniformMatrix4f("mvp", mvp); // 위에서 한꺼번에 합쳐준 mvp 행렬을 버텍스 셰이더 유니폼 변수로 전송
     shd.setUniformMatrix4f("model", model); // 버텍스 좌표를 월드좌표로 변환하기 위해 모델행렬만 따로 버텍스 셰이더 유니폼 변수로 전송
     shd.setUniformMatrix3f("normalMatrix", normalMatrix); // 노말행렬을 버텍스 셰이더 유니폼 변수로 전송
@@ -247,38 +258,34 @@ void ofApp::drawShield(glm::mat4& proj, glm::mat4& view) {
     shd.setUniformTexture("specTex", specTex, 1); // 스펙큘러 라이팅 계산에 사용할 텍스쳐 유니폼 변수로 전송
     shd.setUniformTexture("nrmTex", nrmTex, 2); // 노말 매핑에 사용할 텍스쳐 유니폼 변수로 전송
     shd.setUniformTexture("envMap", cubemap.getTexture(), 3); // 환경맵 반사를 적용하기 위해 사용할 큐브맵 텍스쳐 유니폼 변수로 전송
-    
-    // 이제 각 조명유형별 구조체배열마다 별도로 유니폼 변수에 데이터를 전송해줘야 함.
-    // 참고로, 유니폼 변수 이름의 경우, 쉐이더에서도 헤더파일에서 선언한 것과 유사하게 각 조명별 구조체배열을 uniform 변수로 정의하고 있으므로,
-    // ofApp.cpp 에서 접근하고 있는 것과 동일한 방식으로 데이터를 전달하고자 하는 유니폼 변수명을 지정해주면 됨!
-    shd.setUniform3f("directionalLights[0].direction", getLightDirection(dirLights[0]));
-    shd.setUniform3f("directionalLights[0].color", getLightColor(dirLights[0]));
-    
-    shd.setUniform3f("pointLights[0].position", pointLights[0].position);
-    shd.setUniform3f("pointLights[0].color", getLightColor(pointLights[0]));
-    shd.setUniform1f("pointLights[0].radius", pointLights[0].radius);
-    
-    shd.setUniform3f("pointLights[1].position", pointLights[1].position);
-    shd.setUniform3f("pointLights[1].color", getLightColor(pointLights[1]));
-    shd.setUniform1f("pointLights[1].radius", pointLights[1].radius);
-    
-    shd.setUniform3f("spotLights[0].position", spotLights[0].position);
-    shd.setUniform3f("spotLights[0].direction", spotLights[0].direction);
-    shd.setUniform3f("spotLights[0].color", getLightColor(spotLights[0]));
-    shd.setUniform1f("spotLights[0].cutoff", spotLights[0].cutoff);
-    
-    shd.setUniform3f("spotLights[1].position", spotLights[1].position);
-    shd.setUniform3f("spotLights[1].direction", spotLights[1].direction);
-    shd.setUniform3f("spotLights[1].color", getLightColor(spotLights[1]));
-    shd.setUniform1f("spotLights[1].cutoff", spotLights[1].cutoff);
-    
     shd.setUniform3f("ambientCol", glm::vec3(0.1, 0.1, 0.1)); // 배경색과 동일한 앰비언트 라이트 색상값을 유니폼 변수로 전송.
     shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
     
     shieldMesh.draw(); // shieldMesh 메쉬 드로우콜 호출하여 그려줌.
     
     shd.end();
-    // shd(blinnPhong) 사용 중단
+    // shd 사용 중단
+}
+
+// 포인트라이트 패스 렌더링 시, 블렌딩모드와 깊이테스트 모드를 재설정하는 함수
+void ofApp::beginRenderingPointLights() {
+    // 동적 멀티라이팅 기법에서는 멀티패스 셰이딩, 즉 물체 하나에 여러 개의 셰이더가 적용된 동일한 메쉬를 반복해서 그려주는 방식을 사용함.
+    // 따라서, 이전에 그려진 동일한 메쉬의 색상(기존 버퍼 색상)과 새로 그려진 동일한 메쉬(새 색상)을 가산 블렌딩할 수 있도록 활성화한 것.
+    ofEnableAlphaBlending();
+    ofEnableBlendMode(ofBlendMode::OF_BLENDMODE_ADD);
+    
+    // 깊이 테스트 모드를 GL_LEQUAL 로 변경함. (관련 설명 하단 필기 참고)
+    glDepthFunc(GL_LEQUAL);
+}
+
+// 포인트라이트 패스 렌더링 완료 후, 블렌딩모드와 깊이테스트 모드를 원래대로 초기화하는 함수
+void ofApp::endRenderingPointLights() {
+    // 알파블렌딩 모드를 비활성화함.
+    ofDisableAlphaBlending();
+    ofDisableBlendMode();
+    
+    // 깊이테스트 모드를 원래의 GL_LESS 로 초기화함.
+    glDepthFunc(GL_LESS);
 }
 
 //--------------------------------------------------------------
@@ -289,36 +296,6 @@ void ofApp::draw(){
     static float t = 0.0f; // static 을 특정 함수 내에서 사용하는 것을 '정적 지역 변수'라고 하며, 이 할당문은 drawWater() 함수 최초 호출 시 1번만 실행됨.
     t += ofGetLastFrameTime(); // 이전 프레임과 현재 프레임의 시간 간격인 '델타타임'을 리턴받는 함수를 호출해서 sin함수의 인자로 사용할 시간값 t에 매 프레임마다 더해줌.
     
-    // 헤더파일에서 선언한 각 조명 유형별 구조체배열에 조명데이터를 할당해 줌.
-    // 1개의 디렉셔널라이트 구조체배열에 데이터 할당
-    dirLights[0].color = vec3(1, 1, 0); // 조명색상 노랑색 할당
-    dirLights[0].intensity = 1.0f;
-    dirLights[0].direction = vec3(1, -1, -1);
-    
-    // 2개의 포인트라이트 구조체배열에 데이터 할당
-    pointLights[0].color = vec3(1, 0, 0); // 조명색상 빨간색 할당
-    pointLights[0].radius = 1.0f;
-    pointLights[0].position = vec3(-0.5, 0.5, 0.25);
-    pointLights[0].intensity = 1.0;
-    
-    pointLights[1].color = vec3(0, 1, 0); // 조명색상 초록색 할당
-    pointLights[1].radius = 1.0f;
-    pointLights[1].position = vec3(0.5, 0.5, 0.25);
-    pointLights[1].intensity = 1.0;
-    
-    // 2개의 스포트라이트 구조체배열에 데이터 할당
-    spotLights[0].color = vec3(0, 0, 1); // 조명색상 파란색 할당
-    spotLights[0].position = cam.pos + vec3(0.7, 0.7, 0); // 조명 위치는 카메라 위치에서 좌상단으로 각각 0.7씩만큼 이동함
-    spotLights[0].intensity = 1.0;
-    spotLights[0].direction = vec3(0, 0, -1);
-    spotLights[0].cutoff = glm::cos(glm::radians(35.0f));
-    
-    spotLights[1].color = vec3(0, 1, 1); // 조명색상 청록색 할당
-    spotLights[1].position = cam.pos + vec3(0.0, -0.5, 0); // 조명 위치는 카메라 위치에서 0.5만큼 아래로 내림
-    spotLights[1].intensity = 1.0;
-    spotLights[1].direction = vec3(0, 0, -1);
-    spotLights[1].cutoff = glm::cos(glm::radians(15.0f));
-    
     // 투영행렬 계산
     float aspect = 1024.0f / 768.0f; // main.cpp 에서 정의한 윈도우 실행창 사이즈를 기준으로 원근투영행렬의 종횡비(aspect)값을 계산함.
     mat4 proj = perspective(cam.fov, aspect, 0.01f, 10.0f); // glm::perspective() 내장함수를 사용해 원근투영행렬 계산.
@@ -326,10 +303,26 @@ void ofApp::draw(){
     // 카메라 변환시키는 뷰행렬 계산. 이동행렬만 적용
     mat4 view = inverse(translate(cam.pos)); // 뷰행렬은 카메라 움직임에 반대방향으로 나머지 대상들을 움직이는 변환행렬이므로, glm::inverse() 내장함수로 역행렬을 구해야 함.
     
-    // 이후의 연산은 shield 메쉬 드로우 함수와 water 메쉬 드로우 함수로 쪼개서 추출함.
-    drawShield(proj, view);
-    drawWater(proj, view);
     drawSkybox(proj, view); // cubeMesh 메쉬 드로우 함수를 추출하여 정의한 뒤 호출함.
+
+    // 이제 동일한 방패메쉬 및 물 메쉬에 대해 여러 개의 멀티패스 셰이딩이 적용된 메쉬들을 반복적으로 렌더링함.
+    // 디렉셔널 라이트 셰이더가 적용된 방패메쉬 및 물 메쉬 렌더링함.
+    drawShield(dirLight, proj, view);
+    drawWater(dirLight, proj, view);
+    
+    // 포인트라이트 셰이더가 적용된 방패메쉬 및 물 메쉬 렌더링함.
+    // 이때, 이전에 그린 방패메쉬 및 물 메쉬의 프래그먼트들과 색상을 가산블렌딩하기 위해 알파블렌딩 및 깊이테스트 설정을 변경함
+    beginRenderingPointLights();
+    
+    // 포인트라이트 구조체가 담긴 동적배열을 for loop 로 돌리면서
+    // 원하는 개수만큼의 포인트라이트 셰이더가 적용된 방패메쉬 및 물 메쉬를 반복해서 렌더링함.
+    for (int i = 0; i < pointLights.size(); ++i) {
+        drawShield(pointLights[i], proj, view);
+        drawWater(pointLights[i], proj, view);
+    }
+    
+    // 포인트라이트가 적용된 방패메쉬 및 물 메쉬 렌더링이 모두 끝나면, 알파블렌딩 및 깊이테스트 관련 설정을 초기화함.
+    endRenderingPointLights();
 }
 
 //--------------------------------------------------------------
@@ -411,6 +404,36 @@ void ofApp::dragEvent(ofDragInfo dragInfo){
  
  스카이박스를 전부 그리고 나면 맨 마지막에
  깊이비교모드를 GL_LESS 로 원상복귀시킴.
+ */
+
+/**
+ GL_LESS vs GL_LEQUAL 의 기본 원리
+ 
+ 원론적으로 이야기하면,
+ GL_LESS 는 기본적으로 이전에 그렸던 프래그먼트의
+ 깊이값보다 지금 그리는 프랙먼트의 깊이값이 더 작아야만 통과를 시킴.
+ 
+ 이는 모든 깊이테스트의 기본모드이기 때문에,
+ 이 상태에서 멀티패스 셰이딩으로 동일한 자리에
+ 동일한 방패메쉬를 여러 번 그리고자 한다면,
+ 
+ 방패메쉬의 프래그먼트들은 모두 깊이값이 동일하니까
+ 통과를 못하고 그려지지 않는 것임.
+ 
+ 그래서 임시로 깊이테스트 모드를 GL_LEQUAL 모드로 변경해서
+ '이전 프래그먼트의 깊이값보다 같거나 작은 깊이값' 을 갖는 프래그먼트들도
+ 전부 통과되서 그려질 수 있도록 한 것임.
+ 
+ 이 원리를 이해하면, 위에서
+ 원근분할 시 왜 GL_LEQUAL 을 사용한 것인지도 이해가 감.
+ 
+ 왜냐하면, 스카이박스의 Z / W 값은 모두 1.0이기 때문에,
+ 깊이값이 모두 1.0이 된다는 뜻임.
+ 
+ 이 말은, 앞서 그려지는 깊이값이 1.0인  프래그먼트들에 의해서
+ 스카이박스가 그려지지 않는 문제를 해결하기 위해
+ 1.0보다 같거나 작은 깊이값을 갖는 프래그먼트들(즉, 스카이박스의 프래그먼트들)도
+ 모두 화면에 그려질 수 있도록 GL_LEQUAL 로 깊이테스트 모드를 변경한 것임!
  */
 
 /**
