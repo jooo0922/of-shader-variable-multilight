@@ -124,19 +124,19 @@ void ofApp::setup(){
     pl0.color = glm::vec3(1, 0, 0);
     pl0.radius = 1.0f;
     pl0.position = glm::vec3(-0.5, 0.35, 0.25);
-    pl0.intensity = 3.0;
+    pl0.intensity = 3.0f;
     
     PointLight pl1;
-    pl0.color = glm::vec3(0, 1, 0);
-    pl0.radius = 1.0f;
-    pl0.position = glm::vec3(0.5, 0.35, 0.25);
-    pl0.intensity = 3.0;
+    pl1.color = glm::vec3(0, 1, 0);
+    pl1.radius = 1.0f;
+    pl1.position = glm::vec3(0.5, 0.35, 0.25);
+    pl1.intensity = 3.0f;
     
     PointLight pl2;
-    pl0.color = glm::vec3(0, 0, 1);
-    pl0.radius = 1.0f;
-    pl0.position = glm::vec3(0.0, 0.7, 0.25);
-    pl0.intensity = 3.0;
+    pl2.color = glm::vec3(0, 0, 1);
+    pl2.radius = 1.0f;
+    pl2.position = glm::vec3(0.0, 0.7, 0.25);
+    pl2.intensity = 3.0f;
     
     // 원하는 개수만큼 생성한 포인트라이트 구조체를 pointLights 동적배열에 push함
     // 참고로, 동적배열.push_back() 은 요소를 동적배열 맨뒤에 추가할 때 사용하는 함수임.
@@ -188,7 +188,7 @@ void ofApp::drawWater(Light& light, glm::mat4& proj, glm::mat4& view) {
     mat3 normalMatrix = mat3(transpose(inverse(model)));
     
     // 인자로 받아온 Light 구조체의 isPointLight() 함수 리턴값에 따라 포인트라이트 셰이더 또는 디렉셔널라이트 셰이더 중에서 참조자 shd 가 어떤 셰이더 객체를 참조하도록 할 지 결정함.
-    ofShader& shd = light.isPointLight() ? pointLightShaders[1] : dirLightShaders[1];
+    ofShader shd = light.isPointLight() ? pointLightShaders[1] : dirLightShaders[1];
     
     // shd 를 바인딩하여 사용 시작
     shd.begin();
@@ -244,7 +244,7 @@ void ofApp::drawShield(Light& light, glm::mat4& proj, glm::mat4& view) {
     mat3 normalMatrix = mat3(transpose(inverse(model))); // 노말행렬은 '모델행렬의 상단 3*3 역행렬의 전치행렬' 로 계산함.
     
     // 인자로 받아온 Light 구조체의 isPointLight() 함수 리턴값에 따라 포인트라이트 셰이더 또는 디렉셔널라이트 셰이더 중에서 참조자 shd 가 어떤 셰이더 객체를 참조하도록 할 지 결정함.
-    ofShader& shd = light.isPointLight() ? pointLightShaders[0] : dirLightShaders[0];
+    ofShader shd = light.isPointLight() ? pointLightShaders[0] : dirLightShaders[0];
 
     // shd 를 바인딩하여 사용 시작
     shd.begin();
@@ -258,7 +258,7 @@ void ofApp::drawShield(Light& light, glm::mat4& proj, glm::mat4& view) {
     shd.setUniformTexture("specTex", specTex, 1); // 스펙큘러 라이팅 계산에 사용할 텍스쳐 유니폼 변수로 전송
     shd.setUniformTexture("nrmTex", nrmTex, 2); // 노말 매핑에 사용할 텍스쳐 유니폼 변수로 전송
     shd.setUniformTexture("envMap", cubemap.getTexture(), 3); // 환경맵 반사를 적용하기 위해 사용할 큐브맵 텍스쳐 유니폼 변수로 전송
-    shd.setUniform3f("ambientCol", glm::vec3(0.1, 0.1, 0.1)); // 배경색과 동일한 앰비언트 라이트 색상값을 유니폼 변수로 전송.
+    shd.setUniform3f("ambientCol", glm::vec3(0.0, 0.0, 0.0)); // 배경색과 동일한 앰비언트 라이트 색상값을 유니폼 변수로 전송.
     shd.setUniform3f("cameraPos", cam.pos); // 프래그먼트 셰이더에서 뷰 벡터를 계산하기 위해 카메라 좌표(카메라 월드좌표)를 프래그먼트 셰이더 유니폼 변수로 전송
     
     shieldMesh.draw(); // shieldMesh 메쉬 드로우콜 호출하여 그려줌.
@@ -291,11 +291,7 @@ void ofApp::endRenderingPointLights() {
 //--------------------------------------------------------------
 void ofApp::draw(){
     using namespace glm; // 이제부터 현재 블록 내에서 glm 라이브러리에서 꺼내 쓸 함수 및 객체들은 'glm::' 을 생략해서 사용해도 됨.
-    
-    // sin 함수로 포인트라이트 조명 위치를 매 프레임마다 -1 ~ 1 사이로 왕복하기 위해 sin 함수에 매 프레임마다 넣어줄 값을 계산함.
-    static float t = 0.0f; // static 을 특정 함수 내에서 사용하는 것을 '정적 지역 변수'라고 하며, 이 할당문은 drawWater() 함수 최초 호출 시 1번만 실행됨.
-    t += ofGetLastFrameTime(); // 이전 프레임과 현재 프레임의 시간 간격인 '델타타임'을 리턴받는 함수를 호출해서 sin함수의 인자로 사용할 시간값 t에 매 프레임마다 더해줌.
-    
+        
     // 투영행렬 계산
     float aspect = 1024.0f / 768.0f; // main.cpp 에서 정의한 윈도우 실행창 사이즈를 기준으로 원근투영행렬의 종횡비(aspect)값을 계산함.
     mat4 proj = perspective(cam.fov, aspect, 0.01f, 10.0f); // glm::perspective() 내장함수를 사용해 원근투영행렬 계산.
@@ -307,20 +303,20 @@ void ofApp::draw(){
 
     // 이제 동일한 방패메쉬 및 물 메쉬에 대해 여러 개의 멀티패스 셰이딩이 적용된 메쉬들을 반복적으로 렌더링함.
     // 디렉셔널 라이트 셰이더가 적용된 방패메쉬 및 물 메쉬 렌더링함.
-    drawShield(dirLight, proj, view);
     drawWater(dirLight, proj, view);
-    
+    drawShield(dirLight, proj, view);
+
     // 포인트라이트 셰이더가 적용된 방패메쉬 및 물 메쉬 렌더링함.
     // 이때, 이전에 그린 방패메쉬 및 물 메쉬의 프래그먼트들과 색상을 가산블렌딩하기 위해 알파블렌딩 및 깊이테스트 설정을 변경함
     beginRenderingPointLights();
-    
+
     // 포인트라이트 구조체가 담긴 동적배열을 for loop 로 돌리면서
     // 원하는 개수만큼의 포인트라이트 셰이더가 적용된 방패메쉬 및 물 메쉬를 반복해서 렌더링함.
     for (int i = 0; i < pointLights.size(); ++i) {
-        drawShield(pointLights[i], proj, view);
         drawWater(pointLights[i], proj, view);
+        drawShield(pointLights[i], proj, view);
     }
-    
+
     // 포인트라이트가 적용된 방패메쉬 및 물 메쉬 렌더링이 모두 끝나면, 알파블렌딩 및 깊이테스트 관련 설정을 초기화함.
     endRenderingPointLights();
 }
